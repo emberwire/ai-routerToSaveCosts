@@ -139,11 +139,8 @@ def run_pipeline(
         console.print(exec_result.output_text)
     else:
         exec_result = engine_instance.execute(
-            prompt=sanitized_prompt,
-            context=prep_context_md,
+            payload=payload,
             interactive=interactive,
-            complexity_score=classification.complexity_score,
-            system_instruction=payload.system_instruction,
             model_name=classification.suggested_model,
             effort_level=classification.effort_level,
         )

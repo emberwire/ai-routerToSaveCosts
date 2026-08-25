@@ -5,8 +5,8 @@ from typing import Optional, Dict, Any
 from ai_router.engines.base import BaseExecutionEngine, ExecutionResult, EngineStatus
 from ai_router.config import get_config
 from ai_router.gateway import CloudflareAIGateway
-from ai_router.reasoning_budgeter import ReasoningBudgeter
 from ai_router.stream_renderer import StreamRenderer
+from ai_router.prompt_transformer import TransformedPromptPayload
 
 
 class GeminiExecutionEngine(BaseExecutionEngine):
@@ -26,11 +26,8 @@ class GeminiExecutionEngine(BaseExecutionEngine):
 
     def execute(
         self,
-        prompt: str,
-        context: Optional[str] = None,
+        payload: TransformedPromptPayload,
         interactive: bool = True,
-        complexity_score: int = 3,
-        system_instruction: Optional[str] = None,
         model_name: Optional[str] = None,
         effort_level: int = 5,
     ) -> ExecutionResult:
@@ -50,14 +47,10 @@ class GeminiExecutionEngine(BaseExecutionEngine):
                 error_message="GEMINI_API_KEY is not configured.",
             )
 
-        budget = ReasoningBudgeter.get_budget("gemini", complexity_score)
+        budget = payload.budget_params
+        complexity_score = budget.complexity_score
         model = model_name or (config.gemini_exec_model if complexity_score >= 3 else config.gemini_model)
-
-        user_parts = []
-        if context:
-            user_parts.append(f"### Reference Context:\n{context}\n\n")
-        user_parts.append(f"### Task Objective:\n{prompt}")
-        full_content = "".join(user_parts)
+        full_content = payload.formatted_prompt
 
         if config.enable_cf_gateway and config.cf_account_id and config.cf_gateway_id:
             base_url = CloudflareAIGateway.get_provider_endpoint("google-ai-studio")
@@ -65,17 +58,18 @@ class GeminiExecutionEngine(BaseExecutionEngine):
         else:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?key={config.gemini_api_key}&alt=sse"
 
-        payload = {
+        request_body = {
             "contents": [{"parts": [{"text": full_content}]}],
             "generationConfig": {
-                "temperature": 0.2,
+                "temperature": payload.api_parameters.get("temperature", config.gemini_temperature),
             }
         }
-        if system_instruction:
-            payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+        if payload.system_instruction:
+            request_body["systemInstruction"] = {"parts": [{"text": payload.system_instruction}]}
 
-        if budget.gemini_thinking_budget > 0:
-            payload["generationConfig"]["thinkingConfig"] = {"thinking_budget": budget.gemini_thinking_budget}
+        thinking_config = payload.api_parameters.get("thinking_config")
+        if thinking_config:
+            request_body["generationConfig"]["thinkingConfig"] = thinking_config
 
         headers = {"Content-Type": "application/json"}
         if config.enable_cf_gateway:
@@ -87,7 +81,7 @@ class GeminiExecutionEngine(BaseExecutionEngine):
 
         try:
             with httpx.Client(timeout=60.0) as client:
-                with client.stream("POST", url, json=payload, headers=headers) as response:
+                with client.stream("POST", url, json=request_body, headers=headers) as response:
                     if response.status_code != 200:
                         err_text = response.read().decode()
                         return ExecutionResult(

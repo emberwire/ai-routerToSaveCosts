@@ -5,8 +5,8 @@ from typing import Optional, Dict, Any
 from ai_router.engines.base import BaseExecutionEngine, ExecutionResult, EngineStatus
 from ai_router.config import get_config
 from ai_router.gateway import CloudflareAIGateway
-from ai_router.reasoning_budgeter import ReasoningBudgeter
 from ai_router.stream_renderer import StreamRenderer
+from ai_router.prompt_transformer import TransformedPromptPayload
 
 
 class CodexExecutionEngine(BaseExecutionEngine):
@@ -27,11 +27,8 @@ class CodexExecutionEngine(BaseExecutionEngine):
 
     def execute(
         self,
-        prompt: str,
-        context: Optional[str] = None,
+        payload: TransformedPromptPayload,
         interactive: bool = True,
-        complexity_score: int = 3,
-        system_instruction: Optional[str] = None,
         model_name: Optional[str] = None,
         effort_level: int = 5,
     ) -> ExecutionResult:
@@ -51,19 +48,15 @@ class CodexExecutionEngine(BaseExecutionEngine):
                 error_message="OPENAI_API_KEY is not configured.",
             )
 
-        budget = ReasoningBudgeter.get_budget("codex", complexity_score)
+        budget = payload.budget_params
         model = model_name or config.codex_model
 
         messages = []
-        if system_instruction and not model.startswith("o1"):
+        if payload.system_instruction and not model.startswith("o1"):
             role = "developer" if model.startswith("o3") else "system"
-            messages.append({"role": role, "content": system_instruction})
+            messages.append({"role": role, "content": payload.system_instruction})
 
-        content_parts = []
-        if context:
-            content_parts.append(f"### Reference Context:\n{context}\n\n")
-        content_parts.append(f"### Task:\n{prompt}")
-        messages.append({"role": "user", "content": "".join(content_parts)})
+        messages.append({"role": "user", "content": payload.formatted_prompt})
 
         if config.enable_cf_gateway and config.cf_account_id and config.cf_gateway_id:
             base_url = CloudflareAIGateway.get_provider_endpoint("openai")
@@ -71,14 +64,14 @@ class CodexExecutionEngine(BaseExecutionEngine):
         else:
             url = "https://api.openai.com/v1/chat/completions"
 
-        payload = {
+        request_body = {
             "model": model,
             "messages": messages,
             "stream": True,
         }
 
         if model.startswith("o3") or model.startswith("o1"):
-            payload["reasoning_effort"] = budget.openai_reasoning_effort
+            request_body["reasoning_effort"] = payload.api_parameters.get("reasoning_effort", budget.openai_reasoning_effort)
 
         headers = {
             "Authorization": f"Bearer {config.openai_api_key}",
@@ -93,7 +86,7 @@ class CodexExecutionEngine(BaseExecutionEngine):
 
         try:
             with httpx.Client(timeout=60.0) as client:
-                with client.stream("POST", url, json=payload, headers=headers) as response:
+                with client.stream("POST", url, json=request_body, headers=headers) as response:
                     if response.status_code != 200:
                         err_text = response.read().decode()
                         return ExecutionResult(

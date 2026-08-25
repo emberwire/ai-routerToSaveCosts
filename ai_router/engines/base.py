@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
+from ai_router.prompt_transformer import TransformedPromptPayload
 
 
 class EngineStatus(str, Enum):
@@ -37,15 +38,12 @@ class BaseExecutionEngine(ABC):
     @abstractmethod
     def execute(
         self,
-        prompt: str,
-        context: Optional[str] = None,
+        payload: TransformedPromptPayload,
         interactive: bool = True,
-        complexity_score: int = 3,
-        system_instruction: Optional[str] = None,
         model_name: Optional[str] = None,
         effort_level: int = 5,
     ) -> ExecutionResult:
-        """Executes the prompt with context and returns structured result/telemetry."""
+        """Executes the dialect-transformed prompt payload and returns structured result/telemetry."""
         pass
 
     @abstractmethod

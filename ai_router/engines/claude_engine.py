@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any
 from ai_router.engines.base import BaseExecutionEngine, ExecutionResult, EngineStatus
 from ai_router.config import get_config
 from ai_router.gateway import CloudflareAIGateway
+from ai_router.prompt_transformer import TransformedPromptPayload
 
 
 class ClaudeCodeEngine(BaseExecutionEngine):
@@ -39,11 +40,8 @@ class ClaudeCodeEngine(BaseExecutionEngine):
 
     def execute(
         self,
-        prompt: str,
-        context: Optional[str] = None,
+        payload: TransformedPromptPayload,
         interactive: bool = True,
-        complexity_score: int = 5,
-        system_instruction: Optional[str] = None,
         model_name: Optional[str] = None,
         effort_level: int = 5,
     ) -> ExecutionResult:
@@ -67,14 +65,16 @@ class ClaudeCodeEngine(BaseExecutionEngine):
         target_model = model_name or config.claude_model
         effort = effort_level or config.claude_default_effort
 
-        # Assemble full payload with effort directives
-        effort_directive = f"\n<effort_budget level=\"{effort}\">Apply maximum exhaustive verification, step-by-step reasoning, and edge-case validation.</effort_budget>\n" if effort >= 5 else ""
+        # Layer the effort directive onto the transformer's system instruction
+        system_prompt = payload.system_instruction or ""
+        if effort >= 5:
+            effort_directive = (
+                f'<effort_budget level="{effort}">Apply maximum exhaustive verification, '
+                f'step-by-step reasoning, and edge-case validation.</effort_budget>'
+            )
+            system_prompt = f"{system_prompt}\n{effort_directive}" if system_prompt else effort_directive
 
-        assembled_prompt = prompt
-        if context:
-            assembled_prompt = f"{context}\n\n{effort_directive}<user_prompt>\n{prompt}\n</user_prompt>"
-        elif effort_directive:
-            assembled_prompt = f"{effort_directive}\n{prompt}"
+        assembled_prompt = payload.formatted_prompt
 
         # Prepare Environment
         env = os.environ.copy()
@@ -93,7 +93,10 @@ class ClaudeCodeEngine(BaseExecutionEngine):
         # Interactive Mode: Handover terminal control to Claude Code
         if interactive:
             print(f"\n[AI Router] 🚀 Handing off to Claude Code ({binary}) [Model: {target_model} | Effort: {effort}/5 Extra]...\n")
-            args = [binary, assembled_prompt]
+            args = [binary, "--model", target_model]
+            if system_prompt:
+                args += ["--append-system-prompt", system_prompt]
+            args.append(assembled_prompt)
             try:
                 result = subprocess.run(args, env=env)
                 elapsed = (time.time() - start_time) * 1000
@@ -134,7 +137,10 @@ class ClaudeCodeEngine(BaseExecutionEngine):
 
         # One-Shot Mode (-p)
         else:
-            args = [binary, "-p", assembled_prompt]
+            args = [binary, "-p", "--model", target_model]
+            if system_prompt:
+                args += ["--append-system-prompt", system_prompt]
+            args.append(assembled_prompt)
             try:
                 result = subprocess.run(args, env=env, capture_output=True, text=True, check=False)
                 elapsed = (time.time() - start_time) * 1000

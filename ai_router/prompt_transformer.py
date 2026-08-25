@@ -54,6 +54,9 @@ class PromptTransformer:
         # Claude excels with XML tags
         parts = []
 
+        if ast.repo_context:
+            parts.append(f"<repo_context>\n{ast.repo_context}\n</repo_context>")
+
         if ast.injected_context:
             parts.append(ast.injected_context)
 
@@ -78,6 +81,9 @@ class PromptTransformer:
         # OpenAI o-series / Codex prefers developer instructions and markdown
         sections = []
 
+        if ast.repo_context:
+            sections.append(f"### Project Environment\n{ast.repo_context}")
+
         if ast.injected_context:
             sections.append(f"### Reference Context (External Docs)\n{ast.injected_context}")
 
@@ -90,7 +96,6 @@ class PromptTransformer:
         )
 
         params = {
-            "model": "o3-mini",
             "reasoning_effort": budget.openai_reasoning_effort,
         }
 

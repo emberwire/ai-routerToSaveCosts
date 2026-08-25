@@ -353,8 +353,17 @@ prompts.
 
 ## A13 — The fast path is scope-blind
 
-**Found 2026-08-25, after §0 was ratified. Under quality-first this is the
-largest active hazard in the router.**
+**Found 2026-08-25, after §0 was ratified. Fixed 2026-08-25, commit
+`50d82af` — `ai_router/quality_gate.py`.** Left in place below as the record
+of what the bug was and why the fix takes the shape it does; the fast path
+now gates through `QualityGate.fast_path_eligible()` before its regex loop
+runs at all, and every classification path (fast path, Gemini, heuristic
+fallback, mock mode) clamps its result through `QualityGate.apply()` — which
+only ever raises effort or swaps a light model for a heavy one, never the
+reverse. An independent verification pass found real gaps in the first
+draft's word lists (`"fix typo system-wide"` and similar breadth synonyms
+slipped through); both the gaps and their fixes are recorded in the module
+and in 82 passing tests, 22 of them new.
 
 `IntentClassifier.FAST_EXECUTE_PATTERNS` matches a verb-and-noun prefix and
 routes straight to the cheapest model at the lowest effort, **before any model
@@ -457,10 +466,11 @@ savings on a telemetry layer that counts refusals as wins.
    the ordering, which is itself a decision — it is why A4 permits invisible
    pre-delivery retries but not user-visible ones.
 
-5. **Where is the quality threshold set, and by whom?** §0 makes the router
-   minimize cost subject to quality ≥ threshold, but nothing yet defines the
-   threshold. It cannot be a single global number — a typo fix and a migration
-   do not deserve the same bar. Recommendation: per-intent floors, with the
+5. ~~**Where is the quality threshold set, and by whom?**~~ **Resolved
+   2026-08-25, implemented in `50d82af` as `QualityGate` (see A13).** §0 makes
+   the router minimize cost subject to quality ≥ threshold, but nothing yet
+   defines the threshold. It cannot be a single global number — a typo fix and
+   a migration do not deserve the same bar. Recommendation: per-intent floors, with the
    sensitive-path list from A13 forcing the top tier regardless of intent.
 
 ---

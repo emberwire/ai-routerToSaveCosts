@@ -15,7 +15,7 @@ class AppConfig(BaseSettings):
 
     # Intent Classifier Settings
     gemini_api_key: Optional[str] = Field(default=None, alias="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_MODEL")
+    gemini_model: str = Field(default="gemini-3.7-flash", alias="GEMINI_MODEL")
     gemini_temperature: float = Field(default=0.0, alias="GEMINI_TEMPERATURE")
     gemini_thinking_budget: int = Field(default=0, alias="GEMINI_THINKING_BUDGET")
 
@@ -29,10 +29,11 @@ class AppConfig(BaseSettings):
     # Pluggable Execution Engine Settings
     default_engine: Literal["claude", "gemini", "codex", "auto"] = Field(default="claude", alias="DEFAULT_ENGINE")
     claude_binary_path: Optional[str] = Field(default="/opt/homebrew/bin/claude", alias="CLAUDE_BINARY_PATH")
+    claude_model: str = Field(default="claude-3-7-sonnet", alias="CLAUDE_MODEL")
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
     codex_model: str = Field(default="o3-mini", alias="CODEX_MODEL")
-    gemini_exec_model: str = Field(default="gemini-2.5-pro", alias="GEMINI_EXEC_MODEL")
+    gemini_exec_model: str = Field(default="gemini-3.7-flash", alias="GEMINI_EXEC_MODEL")
 
     # Cloudflare AI Gateway Settings
     cf_account_id: Optional[str] = Field(default=None, alias="CF_ACCOUNT_ID")
@@ -57,7 +58,6 @@ class AppConfig(BaseSettings):
             directory.mkdir(parents=True, exist_ok=True)
             return directory
         except (PermissionError, OSError):
-            # Fallback to local directory if home is not writable (e.g. sandbox/container)
             local_fallback = Path(".ai_router")
             local_fallback.mkdir(parents=True, exist_ok=True)
             return local_fallback
@@ -76,32 +76,21 @@ class AppConfig(BaseSettings):
 
     @classmethod
     def load_hierarchical(cls) -> "AppConfig":
-        """Loads configuration merging Org -> User -> Project -> Environment."""
         data = {}
-
-        # 1. Org Config
         org_path = Path("/etc/ai-router/config.json")
         if org_path.exists():
-            try:
-                data.update(json.loads(org_path.read_text()))
-            except Exception:
-                pass
+            try: data.update(json.loads(org_path.read_text()))
+            except Exception: pass
 
-        # 2. User Config
         user_path = Path.home() / ".ai_router" / "config.json"
         if user_path.exists():
-            try:
-                data.update(json.loads(user_path.read_text()))
-            except Exception:
-                pass
+            try: data.update(json.loads(user_path.read_text()))
+            except Exception: pass
 
-        # 3. Project Config
         project_path = Path(".ai-router.json")
         if project_path.exists():
-            try:
-                data.update(json.loads(project_path.read_text()))
-            except Exception:
-                pass
+            try: data.update(json.loads(project_path.read_text()))
+            except Exception: pass
 
         return cls(**data)
 

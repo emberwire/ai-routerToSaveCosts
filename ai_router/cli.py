@@ -222,6 +222,8 @@ def eval_command():
 @app.command(name="config")
 def config_command(
     set_engine: Optional[str] = typer.Option(None, "--default-engine", help="Set default engine (claude, gemini, codex, auto)"),
+    set_gemini_model: Optional[str] = typer.Option(None, "--gemini-model", help="Set Gemini model (e.g. gemini-3.7-flash, gemini-2.5-flash)"),
+    set_claude_model: Optional[str] = typer.Option(None, "--claude-model", help="Set Claude model (e.g. claude-3-7-sonnet)"),
     set_n8n: Optional[str] = typer.Option(None, "--n8n-url", help="Set n8n webhook URL"),
     set_cf_gateway: Optional[bool] = typer.Option(None, "--enable-gateway", help="Toggle Cloudflare AI Gateway"),
 ):
@@ -234,6 +236,15 @@ def config_command(
     if set_engine:
         config.default_engine = set_engine
         console.print(f"[green]✓ Default engine set to:[/green] {set_engine}")
+
+    if set_gemini_model:
+        config.gemini_model = set_gemini_model
+        config.gemini_exec_model = set_gemini_model
+        console.print(f"[green]✓ Gemini model set to:[/green] {set_gemini_model}")
+
+    if set_claude_model:
+        config.claude_model = set_claude_model
+        console.print(f"[green]✓ Claude model set to:[/green] {set_claude_model}")
 
     if set_n8n:
         config.n8n_webhook_url = set_n8n
@@ -250,7 +261,8 @@ def config_command(
 
     table.add_row("Default Execution Engine", config.default_engine)
     table.add_row("Claude Code Binary Path", config.claude_binary_path or "None")
-    table.add_row("Gemini Model (Classifier)", config.gemini_model)
+    table.add_row("Claude Model", config.claude_model)
+    table.add_row("Gemini Model (Classifier & Exec)", config.gemini_model)
     table.add_row("Gemini API Key", "***" if config.gemini_api_key else "[dim]Not Configured (Heuristic fallback)[/dim]")
     table.add_row("OpenAI API Key", "***" if config.openai_api_key else "[dim]Not Configured[/dim]")
     table.add_row("n8n Webhook URL", config.n8n_webhook_url or "None")
@@ -297,7 +309,7 @@ def run_interactive_wizard():
     elif choice == "7":
         eval_command()
     elif choice == "8":
-        config_command(None, None, None)
+        config_command(None, None, None, None, None)
     elif choice.upper() == "Q":
         console.print("\n[dim]Goodbye![/dim]\n")
         return

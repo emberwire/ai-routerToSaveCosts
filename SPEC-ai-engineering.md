@@ -29,13 +29,51 @@ optimize. Everything below is downstream of that.
 
 ---
 
+## 0 — The governing objective
+
+**Quality first, then cost.** Ratified by Leo, 2026-08-25, resolving what was
+open decision #4.
+
+This is a *lexicographic* ordering, not a weighted tradeoff, and the distinction
+decides most of the architecture below:
+
+> Minimize cost **subject to** quality ≥ threshold.
+> Not: maximize quality per dollar.
+
+Read strictly, that means the router never accepts a worse answer in exchange
+for a saving, however large. Cost is the tiebreaker **among options that all
+clear the bar**, never a reason to drop below it. A 40x price difference does
+not justify a model that might not do the job.
+
+Three consequences, each of which reverses something this codebase currently
+does or something the previous draft of this spec recommended:
+
+1. **Cheap-first cascade is the wrong pattern.** FrugalGPT-style try-cheap →
+   escalate is a *cost-first* architecture: it accepts that some fraction of
+   requests get a bad cheap answer, then repairs them. Under quality-first the
+   user experiences that failure and pays the latency twice. See the revised A4.
+2. **Ambiguity routes up, not down.** Every uncertain classification resolves to
+   the stronger model. This makes A6 (confidence gating) load-bearing rather
+   than optional, and it means a fabricated confidence constant is now a
+   correctness bug, not just dead code.
+3. **Silent successes become the top-severity defect.** A8 — a safety-blocked
+   empty response reported as `status=success` — is a direct violation of the
+   governing objective, not a reporting nuisance.
+
+The cost work in A1–A3 keeps all of its value. Its role changes: it exists to
+choose *among adequate models* and to report honestly, not to justify accepting
+worse output.
+
+---
+
 ## What to expect
 
 | | |
 |---|---|
+| **A13 is the urgent one** | The fast path bypasses classification entirely and routes on a regex. Under quality-first it is the largest active hazard. |
 | **A1–A3 are prerequisites** | Cost model, real token counts, caching. Nothing else can be measured until these land. |
-| **A4 is the architecture** | One-shot routing without escalation is not cost saving. It is quality degradation with extra steps. |
-| **A5–A6 are honesty** | The eval measures self-agreement, and two failure modes report success. |
+| **A4 is the architecture** | Rewritten under §0: conservative predictive routing, not cheap-first cascade. |
+| **A5–A6 are honesty** | The eval measures self-agreement, and confidence is a hardcoded constant now doing load-bearing work. |
 | **A10 is free** | An advertised feature that never runs. Delete the claim or wire the function. |
 
 Confidence: high on every finding — each was executed, not read. See §14.
@@ -120,27 +158,50 @@ is what makes that second engine straightforward.
 
 ---
 
-## A4 — No cascade, no escalation
+## A4 — No quality gate, and no safe way down
 
-**Missing.** The router picks one model and returns whatever comes back. There
-is no quality gate and no path from a failed cheap attempt to a stronger model.
+**Revised under §0.** An earlier draft of this spec recommended a FrugalGPT-style
+cheap-first cascade. Quality-first rules that out as the primary mechanism.
 
-**Why it matters.** This is the architectural gap. Routing *down* without
-escalation is not cost optimization — it is quality degradation with extra
-steps. The established pattern (FrugalGPT and successors) is try-cheap → score →
-escalate on insufficiency, and the score step does not exist here. Without it,
-"savings" are indistinguishable from "worse answers".
+**Missing.** The router picks one model and returns whatever comes back. There is
+no adequacy check of any kind, and no path from a failed attempt to a stronger
+model.
 
-**Fix.**
+**Why it matters.** Routing down without a gate is not cost optimization — it is
+quality degradation with extra steps. But the obvious repair is also wrong here:
+try-cheap → score → escalate accepts a bad first answer as the normal case,
+which under §0 is precisely what must not happen. The user sees the failure and
+waits twice.
 
-1. Cheap verifier scores the cheap model's output for task adequacy.
-2. Below threshold, re-run on the next tier, carrying the first attempt as
-   context.
-3. Escalation rate becomes a first-class metric. A router with a 90% escalation
-   rate is costing money, not saving it, and today nothing would reveal that.
+**Fix — conservative predictive routing, with cascade only where failure is
+invisible.**
 
-Cascade depth should be configurable and capped, and the cap should interact
-with the spend ceiling (`SPEC-desk-ai.md` S4) rather than being independent of it.
+1. **Route up on uncertainty.** The default resolution of any ambiguous
+   classification is the stronger model. Cheap models are selected only when the
+   task is confidently within their envelope — which requires A6 to be real.
+2. **Pre-dispatch structural gates, not post-hoc judging.** Before accepting a
+   cheap route, check the things that predict failure cheaply and
+   deterministically: scope of the request, blast radius, whether the target is
+   sensitive, context size. See A13 — this is exactly what the fast path skips.
+3. **Cascade only on detectable, pre-delivery failure.** Empty output, truncated
+   output, refusal, a `finishReason` other than a normal stop, or a missing
+   required artifact. These are detectable before the user sees anything, so the
+   retry is invisible and quality-first is preserved. Escalate silently, and
+   record the escalation.
+4. **Never cascade on "the answer might be weak."** That judgment needs a model
+   strong enough that you should have used it first.
+
+Escalation rate stays a first-class metric, but its meaning inverts: under
+quality-first a *high* escalation rate means the predictive router is routing
+down too aggressively and should be tuned to be more conservative — not that
+the cascade is working.
+
+Cascade depth is capped and the cap interacts with the spend ceiling
+(`SPEC-desk-ai.md` S4). Note the tension §0 creates: when the ceiling is reached
+mid-cascade, quality-first says finish the escalation and cost-second says stop.
+The ceiling wins, because an unbounded spend is its own failure — but the router
+must then say plainly that it returned a lower-tier answer, rather than
+presenting it as final.
 
 ---
 
@@ -290,26 +351,91 @@ prompts.
 
 ---
 
+## A13 — The fast path is scope-blind
+
+**Found 2026-08-25, after §0 was ratified. Under quality-first this is the
+largest active hazard in the router.**
+
+`IntentClassifier.FAST_EXECUTE_PATTERNS` matches a verb-and-noun prefix and
+routes straight to the cheapest model at the lowest effort, **before any model
+sees the prompt**. It reads the first few words and discards the rest. Executed:
+
+| Prompt | Routes to |
+|---|---|
+| `Fix typo in README.md` | `claude-haiku-4-5`, effort 1 |
+| `Fix syntax across the entire auth module` | `claude-haiku-4-5`, effort 1 |
+| `Fix lint in the payment reconciliation service` | `claude-haiku-4-5`, effort 1 |
+| `correct spelling in the PPM offering document` | `claude-haiku-4-5`, effort 1 |
+| `remove unused code from the crypto signing path` | `claude-haiku-4-5`, effort 1 |
+| `git commit the migration that drops the users table` | `claude-haiku-4-5`, effort 1 |
+| `rename function verifyWebhookSignature everywhere` | `claude-haiku-4-5`, effort 1 |
+
+Only the first is a genuine fast-path task. Every other row names a scope the
+regex never looks at — "across the entire auth module", "the crypto signing
+path", "drops the users table", "everywhere" — and one of them is a destructive
+git operation dispatched to the weakest model at minimum effort.
+
+**Why it matters.** This cannot be fixed by improving classification, because
+the fast path exists to *skip* classification. It is a 5ms optimization that
+buys latency by discarding the information needed to route safely, and it sits
+upstream of every other quality control in this document. Under §0 it is a
+direct violation: it routes down on no evidence at all.
+
+The counsel-gate case is worth stating separately. `correct spelling in the PPM
+offering document` sends Reg D offering material to the cheapest model at the
+lowest effort on the strength of the word "correct".
+
+**Fix.**
+
+1. **Scope guards on every fast-path match.** Reject the fast path when the
+   prompt names breadth (`all`, `every`, `everywhere`, `across`, `entire`,
+   `codebase`, `module`, `service`), sensitivity (paths or nouns on a
+   sensitive list — auth, crypto, signing, payment, migration, PPM, offering),
+   or destructive verbs (`drop`, `delete`, `rm`, `truncate`, `force`, `reset`).
+   Any hit falls through to full classification rather than routing cheap.
+2. **Bound it by length.** A genuine fast-path task is short. A prompt past a
+   modest word count is not a typo fix regardless of how it opens.
+3. **Never fast-path a `git` command with side effects.** The current
+   `^git\s+(status|diff|add|commit|push|checkout|branch)` pattern mixes
+   read-only verbs with `commit`, `push` and `checkout`. Split it: read-only
+   verbs may fast-path, the rest may not.
+4. **Log every fast-path decision** so the false-positive rate is measurable
+   rather than assumed. This is the cheapest input to the A5 eval.
+
+---
+
 ## Build order
 
 Each stage unblocks the next; the order is not arbitrary.
 
-**Stage 1 — make it measurable.** A1 price table, A2 tokenizer. Nothing
+**Stage 0 — stop routing down on no evidence.** A13 scope guards. Promoted to
+first under §0: it is live, it is upstream of every other control here, and it
+is the one gap actively producing bad routes today. Days, not weeks.
+
+**Stage 1 — stop lying.** A8 silent successes, A7 classifier visibility, A10
+dead dedup. Promoted above the cost work: under quality-first, a failure
+reported as a success is the worst defect in the system, and all three corrupt
+the metrics Stage 2 is about to make real.
+
+**Stage 2 — make it measurable.** A1 price table, A2 tokenizer. Nothing
 downstream can be evaluated until a call has a real cost and a real token count.
 
-**Stage 2 — stop lying.** A7 classifier visibility, A8 silent successes, A10
-dead dedup. All three corrupt the metrics Stage 1 just made real, so they close
-before anything is measured with them.
-
 **Stage 3 — take the free money.** A3 prompt caching, A12 classification cache.
-Largest cost reduction per unit of work, and independent of the routing logic.
+Largest cost reduction per unit of work, independent of the routing logic, and
+free of any quality tradeoff — which is exactly why it is the cost work that
+survives §0 untouched.
 
-**Stage 4 — the architecture.** A4 cascade and escalation, A6 confidence gating.
-This is where the tool starts genuinely routing rather than pattern-matching.
+**Stage 4 — the architecture.** A6 real confidence, then A4 conservative
+predictive routing. In that order: routing up on uncertainty is meaningless
+while confidence is a hardcoded constant.
 
 **Stage 5 — harden and prove.** A9 retry and failover, A11 effort parity, A5
 outcome-based eval on real traffic. The eval goes last because it needs
 everything above it to measure anything meaningful.
+
+The reordering against the previous draft is entirely a consequence of §0.
+Cost-first would have run Stage 2 before Stage 1; quality-first will not measure
+savings on a telemetry layer that counts refusals as wins.
 
 ---
 
@@ -326,10 +452,16 @@ everything above it to measure anything meaningful.
    model.
 3. **Is `confidence` derived or deleted?** Both defensible. Leaving a hardcoded
    constant in a routing decision is not.
-4. **Does the router optimize cost, latency, or quality?** These conflict and
-   the code currently implies all three. Until it is stated, "adequate" in
-   "cheapest adequate model" has no definition and the cascade in A4 cannot be
-   specified.
+4. ~~**Does the router optimize cost, latency, or quality?**~~ **Resolved
+   2026-08-25: quality first, then cost.** See §0. Latency is explicitly not in
+   the ordering, which is itself a decision — it is why A4 permits invisible
+   pre-delivery retries but not user-visible ones.
+
+5. **Where is the quality threshold set, and by whom?** §0 makes the router
+   minimize cost subject to quality ≥ threshold, but nothing yet defines the
+   threshold. It cannot be a single global number — a typo fix and a migration
+   do not deserve the same bar. Recommendation: per-intent floors, with the
+   sensitive-path list from A13 forcing the top tier regardless of intent.
 
 ---
 
@@ -348,6 +480,7 @@ Executed, not read. All on 2026-08-25 against `f744977`.
 | A10 dead dedup | `grep -rn "compute_jaccard_similarity"` | definition + its own test only |
 | A11 effort as prose | stub binary captured real argv | `<effort_budget>` in the prompt text |
 | `--fallback-model` unused | `claude --help`; `grep` the codebase | flag exists, never passed |
+| A13 scope-blind fast path | ran 8 prompts through `IntentClassifier.evaluate` | all 8 → `claude-haiku-4-5`, effort 1, `is_fast_path=True` |
 
 The telemetry distortion that motivates A1 and A5 is recorded separately in
 `consoleDesk/SPEC-desk-ai.md` §8 E2: 34 Cloudflare edge cache hits recorded with

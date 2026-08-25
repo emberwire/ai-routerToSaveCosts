@@ -67,13 +67,13 @@ def run_pipeline(
     # Step 2: Local Repo Micro-Fingerprint Scan (<10ms)
     repo_summary = ContextScanner.get_summary_prompt_context()
 
-    # Step 3: Intent & Complexity Classification
+    # Step 3: Intent & Complexity & Model Classification
     if mock_mode:
         classification = MockServices.mock_classification(sanitized_prompt, force_engine=forced_engine)
     else:
         classification = IntentClassifier.evaluate(sanitized_prompt, repo_context=repo_summary, force_engine=forced_engine)
 
-    # Resolve target engine
+    # Resolve target engine & model
     target_engine_name = forced_engine or classification.suggested_engine or config.default_engine
     if target_engine_name == "auto":
         target_engine_name = classification.suggested_engine or "claude"
@@ -128,8 +128,14 @@ def run_pipeline(
     engine_instance = registry.get_engine(target_engine_name)
 
     if mock_mode:
-        exec_result = MockServices.mock_execution(target_engine_name, sanitized_prompt, prep_context_md)
-        console.print(f"\n[bold green]✅ Simulation Complete ({target_engine_name.upper()} Engine)[/bold green]")
+        exec_result = MockServices.mock_execution(
+            target_engine_name,
+            sanitized_prompt,
+            prep_context_md,
+            model=classification.suggested_model,
+            effort=classification.effort_level,
+        )
+        console.print(f"\n[bold green]✅ Simulation Complete ({target_engine_name.upper()} - {classification.suggested_model}) [Effort: {classification.effort_level}/5 Extra][/bold green]")
         console.print(exec_result.output_text)
     else:
         exec_result = engine_instance.execute(
@@ -138,6 +144,8 @@ def run_pipeline(
             interactive=interactive,
             complexity_score=classification.complexity_score,
             system_instruction=payload.system_instruction,
+            model_name=classification.suggested_model,
+            effort_level=classification.effort_level,
         )
 
     duration_ms = (time.time() - start_time) * 1000
@@ -153,6 +161,7 @@ def run_pipeline(
         duration_ms=duration_ms,
         circuit_status=get_circuit_breaker().state.value,
         exit_code=exec_result.exit_code,
+        extra_metadata={"model": classification.suggested_model, "effort": classification.effort_level},
     )
 
     TelemetryROI.record_command(
@@ -222,8 +231,8 @@ def eval_command():
 @app.command(name="config")
 def config_command(
     set_engine: Optional[str] = typer.Option(None, "--default-engine", help="Set default engine (claude, gemini, codex, auto)"),
+    set_claude_model: Optional[str] = typer.Option(None, "--claude-model", help="Set Claude model (e.g. claude-3-opus, claude-3-7-sonnet)"),
     set_gemini_model: Optional[str] = typer.Option(None, "--gemini-model", help="Set Gemini model (e.g. gemini-3.7-flash, gemini-2.5-flash)"),
-    set_claude_model: Optional[str] = typer.Option(None, "--claude-model", help="Set Claude model (e.g. claude-3-7-sonnet)"),
     set_n8n: Optional[str] = typer.Option(None, "--n8n-url", help="Set n8n webhook URL"),
     set_cf_gateway: Optional[bool] = typer.Option(None, "--enable-gateway", help="Toggle Cloudflare AI Gateway"),
 ):
@@ -237,14 +246,14 @@ def config_command(
         config.default_engine = set_engine
         console.print(f"[green]✓ Default engine set to:[/green] {set_engine}")
 
+    if set_claude_model:
+        config.claude_model = set_claude_model
+        console.print(f"[green]✓ Claude model set to:[/green] {set_claude_model}")
+
     if set_gemini_model:
         config.gemini_model = set_gemini_model
         config.gemini_exec_model = set_gemini_model
         console.print(f"[green]✓ Gemini model set to:[/green] {set_gemini_model}")
-
-    if set_claude_model:
-        config.claude_model = set_claude_model
-        console.print(f"[green]✓ Claude model set to:[/green] {set_claude_model}")
 
     if set_n8n:
         config.n8n_webhook_url = set_n8n
@@ -261,8 +270,8 @@ def config_command(
 
     table.add_row("Default Execution Engine", config.default_engine)
     table.add_row("Claude Code Binary Path", config.claude_binary_path or "None")
-    table.add_row("Claude Model", config.claude_model)
-    table.add_row("Gemini Model (Classifier & Exec)", config.gemini_model)
+    table.add_row("Claude Model (Default)", f"{config.claude_model} (Effort: {config.claude_default_effort}/5 Extra)")
+    table.add_row("Gemini Model (Classifier)", config.gemini_model)
     table.add_row("Gemini API Key", "***" if config.gemini_api_key else "[dim]Not Configured (Heuristic fallback)[/dim]")
     table.add_row("OpenAI API Key", "***" if config.openai_api_key else "[dim]Not Configured[/dim]")
     table.add_row("n8n Webhook URL", config.n8n_webhook_url or "None")
@@ -291,7 +300,7 @@ def run_interactive_wizard():
         mock_choice = Prompt.ask("Run with mock simulation? [y/N]", default="n").lower() == "y"
         run_pipeline(prompt=task_prompt, forced_engine=engine_choice, mock_mode=mock_choice)
     elif choice == "2":
-        task_prompt = Prompt.ask("\n[bold magenta]Enter Claude prompt (or press Enter for interactive REPL)[/bold magenta]", default="")
+        task_prompt = Prompt.ask("\n[bold magenta]Enter Claude prompt (or press Enter for interactive Opus REPL)[/bold magenta]", default="")
         mock_choice = Prompt.ask("Run with mock simulation? [y/N]", default="n").lower() == "y"
         run_pipeline(prompt=task_prompt or "Start interactive coding session", forced_engine="claude", mock_mode=mock_choice)
     elif choice == "3":

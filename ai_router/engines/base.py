@@ -42,6 +42,8 @@ class BaseExecutionEngine(ABC):
         interactive: bool = True,
         complexity_score: int = 3,
         system_instruction: Optional[str] = None,
+        model_name: Optional[str] = None,
+        effort_level: int = 5,
     ) -> ExecutionResult:
         """Executes the prompt with context and returns structured result/telemetry."""
         pass

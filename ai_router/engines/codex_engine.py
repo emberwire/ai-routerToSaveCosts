@@ -32,6 +32,8 @@ class CodexExecutionEngine(BaseExecutionEngine):
         interactive: bool = True,
         complexity_score: int = 3,
         system_instruction: Optional[str] = None,
+        model_name: Optional[str] = None,
+        effort_level: int = 5,
     ) -> ExecutionResult:
         start_time = time.time()
         config = get_config()
@@ -50,12 +52,10 @@ class CodexExecutionEngine(BaseExecutionEngine):
             )
 
         budget = ReasoningBudgeter.get_budget("codex", complexity_score)
-        model = config.codex_model
+        model = model_name or config.codex_model
 
-        # Build messages payload
         messages = []
         if system_instruction and not model.startswith("o1"):
-            # o1 doesn't support system, o3-mini supports developer
             role = "developer" if model.startswith("o3") else "system"
             messages.append({"role": role, "content": system_instruction})
 
@@ -65,7 +65,6 @@ class CodexExecutionEngine(BaseExecutionEngine):
         content_parts.append(f"### Task:\n{prompt}")
         messages.append({"role": "user", "content": "".join(content_parts)})
 
-        # Build endpoint URL
         if config.enable_cf_gateway and config.cf_account_id and config.cf_gateway_id:
             base_url = CloudflareAIGateway.get_provider_endpoint("openai")
             url = f"{base_url}/chat/completions"
@@ -78,7 +77,6 @@ class CodexExecutionEngine(BaseExecutionEngine):
             "stream": True,
         }
 
-        # Add reasoning effort for o-series models
         if model.startswith("o3") or model.startswith("o1"):
             payload["reasoning_effort"] = budget.openai_reasoning_effort
 
@@ -139,7 +137,6 @@ class CodexExecutionEngine(BaseExecutionEngine):
             in_tokens = max(10, len(str(messages).split()))
             out_tokens = max(10, len(full_output.split()))
 
-            # Approx cost for o3-mini ($1.10 / 1M in, $4.40 / 1M out)
             cost = (in_tokens / 1_000_000 * 1.10) + (out_tokens / 1_000_000 * 4.40)
 
             return ExecutionResult(

@@ -13,7 +13,7 @@ class AppConfig(BaseSettings):
     """
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    # Intent Classifier Settings
+    # Intent & Model Classifier Settings
     gemini_api_key: Optional[str] = Field(default=None, alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-3.7-flash", alias="GEMINI_MODEL")
     gemini_temperature: float = Field(default=0.0, alias="GEMINI_TEMPERATURE")
@@ -26,10 +26,11 @@ class AppConfig(BaseSettings):
     enable_n8n_prep: bool = Field(default=True, alias="ENABLE_N8N_PREP")
     enable_local_scraper_fallback: bool = Field(default=True, alias="ENABLE_LOCAL_SCRAPER_FALLBACK")
 
-    # Pluggable Execution Engine Settings
+    # Pluggable Execution Engine Settings (Defaults to Opus with Effort 5 Extra)
     default_engine: Literal["claude", "gemini", "codex", "auto"] = Field(default="claude", alias="DEFAULT_ENGINE")
     claude_binary_path: Optional[str] = Field(default="/opt/homebrew/bin/claude", alias="CLAUDE_BINARY_PATH")
-    claude_model: str = Field(default="claude-3-7-sonnet", alias="CLAUDE_MODEL")
+    claude_model: str = Field(default="claude-3-opus", alias="CLAUDE_MODEL")
+    claude_default_effort: int = Field(default=5, alias="CLAUDE_DEFAULT_EFFORT") # Effort 5 Extra
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
     codex_model: str = Field(default="o3-mini", alias="CODEX_MODEL")

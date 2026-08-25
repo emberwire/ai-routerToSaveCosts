@@ -11,7 +11,7 @@ from ai_router.stream_renderer import StreamRenderer
 
 class GeminiExecutionEngine(BaseExecutionEngine):
     """
-    Gemini 2.5 Pro / Flash Execution Engine:
+    Gemini 3.7 / 2.5 Pro / Flash Execution Engine:
     - Supports large context window analysis (up to 2M tokens).
     - Streams code output live with syntax highlighting.
     - Proxies through Cloudflare AI Gateway when enabled.
@@ -31,6 +31,8 @@ class GeminiExecutionEngine(BaseExecutionEngine):
         interactive: bool = True,
         complexity_score: int = 3,
         system_instruction: Optional[str] = None,
+        model_name: Optional[str] = None,
+        effort_level: int = 5,
     ) -> ExecutionResult:
         start_time = time.time()
         config = get_config()
@@ -49,16 +51,14 @@ class GeminiExecutionEngine(BaseExecutionEngine):
             )
 
         budget = ReasoningBudgeter.get_budget("gemini", complexity_score)
-        model = config.gemini_exec_model if complexity_score >= 3 else config.gemini_model
+        model = model_name or (config.gemini_exec_model if complexity_score >= 3 else config.gemini_model)
 
-        # Assemble prompt contents
         user_parts = []
         if context:
             user_parts.append(f"### Reference Context:\n{context}\n\n")
         user_parts.append(f"### Task Objective:\n{prompt}")
         full_content = "".join(user_parts)
 
-        # Build URL (Direct or Cloudflare AI Gateway)
         if config.enable_cf_gateway and config.cf_account_id and config.cf_gateway_id:
             base_url = CloudflareAIGateway.get_provider_endpoint("google-ai-studio")
             url = f"{base_url}/v1beta/models/{model}:streamGenerateContent?alt=sse"
@@ -102,7 +102,6 @@ class GeminiExecutionEngine(BaseExecutionEngine):
                             error_message=f"Gemini API returned {response.status_code}: {err_text}",
                         )
 
-                    # Stream tokens
                     renderer = StreamRenderer(title=f"Gemini ({model}) Stream")
                     for line in response.iter_lines():
                         if not line or not line.startswith("data: "):
@@ -137,7 +136,7 @@ class GeminiExecutionEngine(BaseExecutionEngine):
                 duration_ms=elapsed,
                 input_tokens=in_tokens,
                 output_tokens=out_tokens,
-                cost_usd=0.0,  # Free Google tier
+                cost_usd=0.0,
                 gateway_metadata={"ttft_ms": ttft_ms},
             )
 

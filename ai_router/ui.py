@@ -56,23 +56,23 @@ def render_launcher_screen():
     # Row 1: System Status & Telemetry Cards
     engine_badges = []
     if statuses.get("claude"):
-        engine_badges.append("[bold magenta]🟣 Claude Code[/bold magenta] [green]●[/green]")
+        engine_badges.append(f"[bold magenta]🟣 Claude Code[/bold magenta] [green]●[/green] [dim]({config.claude_model} | Effort: {config.claude_default_effort}/5 Extra)[/dim]")
     else:
         engine_badges.append("[dim magenta]🟣 Claude[/dim magenta] [dim yellow]○[/dim yellow]")
 
     if statuses.get("gemini"):
-        engine_badges.append("[bold blue]🔵 Gemini 2.5[/bold blue] [green]●[/green]")
+        engine_badges.append(f"[bold blue]🔵 Gemini 3.7[/bold blue] [green]●[/green] [dim]({config.gemini_model})[/dim]")
     else:
         engine_badges.append("[dim blue]🔵 Gemini[/dim blue] [dim yellow]○[/dim yellow]")
 
     if statuses.get("codex"):
-        engine_badges.append("[bold green]🟢 Codex/o3[/bold green] [green]●[/green]")
+        engine_badges.append(f"[bold green]🟢 Codex/o3[/bold green] [green]●[/green] [dim]({config.codex_model})[/dim]")
     else:
         engine_badges.append("[dim green]🟢 Codex[/dim green] [dim yellow]○[/dim yellow]")
 
     engines_card = Panel(
         "\n".join(engine_badges),
-        title="[bold]⚡ Active Engines[/bold]",
+        title="[bold]⚡ Active Engines & Defaults[/bold]",
         border_style="cyan",
     )
 
@@ -109,13 +109,13 @@ def render_launcher_screen():
     menu_table.add_column("Description", style="dim")
 
     menu_table.add_row("1", "🚀 Run AI Task Prompt", "Execute a task with automatic intent evaluation and n8n prep")
-    menu_table.add_row("2", "🟣 Launch Claude Code", "Interactive TTY terminal coding session with Claude Code")
-    menu_table.add_row("3", "🔵 Launch Gemini Assistant", "Large context (2M tokens) live streaming coding assistant")
+    menu_table.add_row("2", "🟣 Launch Claude Code (Opus)", "Interactive TTY terminal coding session with Claude Opus (Effort 5)")
+    menu_table.add_row("3", "🔵 Launch Gemini Assistant", "Large context (2M tokens) live streaming coding assistant (Gemini 3.7)")
     menu_table.add_row("4", "🟢 Launch Codex / o-series", "OpenAI o3-mini/o1 deep reasoning execution session")
     menu_table.add_row("5", "🩺 System Diagnostics", "Run 1-click self-healing health check (ai doctor)")
     menu_table.add_row("6", "📊 ROI & Telemetry Report", "Detailed token compression and dollar savings dashboard (ai roi)")
     menu_table.add_row("7", "🧪 Routing Benchmark Evals", "Run synthetic test harness to verify routing precision (ai eval)")
-    menu_table.add_row("8", "⚙️  Configure Settings", "Manage API keys, webhooks, Cloudflare Gateway, and defaults")
+    menu_table.add_row("8", "⚙️  Configure Settings", "Manage models (Opus/Sonnet/Gemini), API keys, webhooks, and defaults")
     menu_table.add_row("Q", "🚪 Exit", "Exit AI Router CLI")
 
     console.print(menu_table)
@@ -130,15 +130,16 @@ def print_intent_badge(res: ClassificationResult, engine: str):
     }
     color = intent_colors.get(res.intent, "white")
     fast_badge = "[bold yellow]⚡ FAST PATH[/bold yellow] | " if res.is_fast_path else ""
+    effort_badge = f"[bold red]⚡ Effort: {res.effort_level}/5 (EXTRA)[/bold red]" if res.effort_level >= 5 else f"Effort: {res.effort_level}/5"
     
     table = Table.grid(padding=(0, 2))
     table.add_row(
         f"[{color}]🎯 Intent: [bold]{res.intent}[/bold][/{color}]",
-        f"[cyan]🎚️ Complexity: {res.complexity_score}/5[/cyan]",
-        f"[blue]🚀 Engine: [bold]{engine.upper()}[/bold][/blue]",
+        f"[blue]🚀 Engine: [bold]{engine.upper()}[/bold] [cyan]({res.suggested_model})[/cyan][/blue]",
+        f"[magenta]{effort_badge}[/magenta]",
         f"[dim]({fast_badge}{res.evaluation_duration_ms:.1f}ms)[/dim]",
     )
-    console.print(Panel(table, border_style=color, title="[bold]Routing Decision[/bold]"))
+    console.print(Panel(table, border_style=color, title="[bold]Routing & Model Decision[/bold]"))
 
 
 def print_research_panel(markdown_content: str, source_url: Optional[str] = None):
@@ -192,18 +193,18 @@ def print_eval_report(report):
     table.add_column("Category", style="cyan")
     table.add_column("Expected", style="dim")
     table.add_column("Actual", style="bold")
-    table.add_column("Score", justify="center")
+    table.add_column("Model Identified", style="magenta")
     table.add_column("Latency", justify="right")
     table.add_column("Result", justify="center")
 
     for r in report.results:
         res_badge = "[bold green]PASS[/bold green]" if r["pass"] else "[bold red]FAIL[/bold red]"
         table.add_row(
-            r["prompt"][:45] + "...",
+            r["prompt"][:40] + "...",
             r["category"],
             r["expected"],
             r["actual"],
-            f"{r['complexity']}/5",
+            r.get("model", "opus"),
             f"{r['latency_ms']:.1f}ms",
             res_badge,
         )

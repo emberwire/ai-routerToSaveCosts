@@ -14,7 +14,9 @@ class ClaudeCodeEngine(BaseExecutionEngine):
     """
     Claude Code CLI Execution Engine:
     - Resolves `/opt/homebrew/bin/claude` or system PATH.
-    - Default Interactive TTY Handover: Uses `os.execvp` or PTY so the developer retains full interactive terminal.
+    - Defaults to Claude Opus with Effort 5 Extra.
+    - Passes identified model via environment and prompt directives.
+    - Default Interactive TTY Handover: Uses `subprocess.run` with stdio connected so developer retains full interactive terminal.
     - One-Shot / Script Mode: Invokes `claude -p "<prompt>"` capturing output.
     - Automatically injects Cloudflare AI Gateway URL into `ANTHROPIC_BASE_URL` when enabled.
     """
@@ -27,7 +29,6 @@ class ClaudeCodeEngine(BaseExecutionEngine):
         if config.claude_binary_path and Path(config.claude_binary_path).exists():
             return config.claude_binary_path
         
-        # Check /opt/homebrew/bin/claude or PATH
         if Path("/opt/homebrew/bin/claude").exists():
             return "/opt/homebrew/bin/claude"
 
@@ -41,8 +42,10 @@ class ClaudeCodeEngine(BaseExecutionEngine):
         prompt: str,
         context: Optional[str] = None,
         interactive: bool = True,
-        complexity_score: int = 3,
+        complexity_score: int = 5,
         system_instruction: Optional[str] = None,
+        model_name: Optional[str] = None,
+        effort_level: int = 5,
     ) -> ExecutionResult:
         start_time = time.time()
         binary = self.get_binary_path()
@@ -61,13 +64,21 @@ class ClaudeCodeEngine(BaseExecutionEngine):
                 error_message="Claude Code binary not found (expected /opt/homebrew/bin/claude or in PATH).",
             )
 
-        # Assemble full payload
+        target_model = model_name or config.claude_model
+        effort = effort_level or config.claude_default_effort
+
+        # Assemble full payload with effort directives
+        effort_directive = f"\n<effort_budget level=\"{effort}\">Apply maximum exhaustive verification, step-by-step reasoning, and edge-case validation.</effort_budget>\n" if effort >= 5 else ""
+
         assembled_prompt = prompt
         if context:
-            assembled_prompt = f"{context}\n\n<user_prompt>\n{prompt}\n</user_prompt>"
+            assembled_prompt = f"{context}\n\n{effort_directive}<user_prompt>\n{prompt}\n</user_prompt>"
+        elif effort_directive:
+            assembled_prompt = f"{effort_directive}\n{prompt}"
 
         # Prepare Environment
         env = os.environ.copy()
+        env["ANTHROPIC_MODEL"] = target_model
         gateway_meta = None
 
         if config.enable_cf_gateway and config.cf_account_id and config.cf_gateway_id:
@@ -81,11 +92,9 @@ class ClaudeCodeEngine(BaseExecutionEngine):
 
         # Interactive Mode: Handover terminal control to Claude Code
         if interactive:
-            print(f"\n[AI Router] 🚀 Handing off to Claude Code ({binary})...\n")
-            # In interactive mode, we invoke claude with the initial prompt passed as an argument or interactive start
+            print(f"\n[AI Router] 🚀 Handing off to Claude Code ({binary}) [Model: {target_model} | Effort: {effort}/5 Extra]...\n")
             args = [binary, assembled_prompt]
             try:
-                # Use subprocess.run with stdio connected for interactive REPL
                 result = subprocess.run(args, env=env)
                 elapsed = (time.time() - start_time) * 1000
                 return ExecutionResult(

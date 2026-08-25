@@ -57,6 +57,8 @@ class EvalHarness:
                 "category": case.category,
                 "expected": case.expected_intent,
                 "actual": res.intent,
+                "model": res.suggested_model,
+                "effort": res.effort_level,
                 "complexity": res.complexity_score,
                 "latency_ms": res.evaluation_duration_ms,
                 "fast_path": res.is_fast_path,

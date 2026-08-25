@@ -1,23 +1,14 @@
 import sys
 import os
-import time
 from typing import Optional
 import typer
 from rich.console import Console
 from rich.prompt import Prompt
 from ai_router.config import get_config, set_config
-from ai_router.security_guard import SecurityGuard
-from ai_router.audit_logger import AuditLogger
-from ai_router.context_scanner import ContextScanner
-from ai_router.classifier import IntentClassifier
-from ai_router.n8n_pipeline import N8nResearchPipeline
-from ai_router.prompt_transformer import CanonicalPromptAST, PromptTransformer
-from ai_router.engines.registry import get_engine_registry
+from ai_router.api import AIRouter, RouterEvent
 from ai_router.telemetry_roi import TelemetryROI
 from ai_router.diagnostics import Diagnostics
 from ai_router.eval_harness import EvalHarness
-from ai_router.mock_services import MockServices
-from ai_router.circuit_breaker import get_circuit_breaker
 from ai_router.ui import (
     console,
     print_banner,
@@ -47,128 +38,68 @@ def run_pipeline(
     mock_mode: bool = False,
     offline_mode: bool = False,
 ):
-    config = get_config()
-    if offline_mode:
-        config.offline_mode = True
-
-    start_time = time.time()
+    """
+    Thin Rich-rendering consumer of `AIRouter.route()`. All orchestration now lives
+    in `ai_router.api.AIRouter`; this function only turns `RouterEvent`s into the
+    exact console output the CLI has always produced, plus a final render of the
+    returned `RouteResult`.
+    """
     print_banner()
 
-    # Step 1: CSO Local Data Loss Prevention (DLP) Scan
-    dlp_violations = []
-    sanitized_prompt = prompt
-    if config.enable_dlp_scanner:
-        dlp_res = SecurityGuard.scan_dlp(prompt, redact=True)
-        if not dlp_res.is_clean:
-            dlp_violations = dlp_res.violations
-            console.print(f"[bold red]🛡️  CSO DLP Alert:[/bold red] Detected sensitive patterns: {', '.join(dlp_violations)}. Sanitizing before network egress.")
-            sanitized_prompt = dlp_res.sanitized_text
+    # Preserve exact ambient-config semantics: `run_pipeline` historically read/mutated
+    # the process-wide singleton (e.g. `--offline` stuck for the rest of the process).
+    router = AIRouter(config=get_config())
 
-    # Step 2: Local Repo Micro-Fingerprint Scan (<10ms)
-    repo_summary = ContextScanner.get_summary_prompt_context()
+    prep: Optional[bool] = None
+    if force_prep:
+        prep = True
+    elif bypass_prep:
+        prep = False
 
-    # Step 3: Intent & Complexity & Model Classification
-    if mock_mode:
-        classification = MockServices.mock_classification(sanitized_prompt, force_engine=forced_engine)
-    else:
-        classification = IntentClassifier.evaluate(sanitized_prompt, repo_context=repo_summary, force_engine=forced_engine)
-
-    # Resolve target engine & model
-    target_engine_name = forced_engine or classification.suggested_engine or config.default_engine
-    if target_engine_name == "auto":
-        target_engine_name = classification.suggested_engine or "claude"
-
-    print_intent_badge(classification, target_engine_name)
-
-    # Determine whether to run prep pipeline
-    should_prep = (classification.intent == "PREP_AND_EXECUTE" or force_prep) and not bypass_prep
-
-    prep_context_md = None
-    source_url = None
-    raw_len = 0
-    pruned_tokens = 0
-    circuit_tripped = False
-
-    # Step 4: Research Pipeline (if required)
-    if should_prep:
-        with console.status("[bold cyan]⚡ Calling n8n Research Pipeline... Fetching & condensing context...[/bold cyan]", spinner="dots"):
-            if mock_mode:
-                prep_result = MockServices.mock_n8n_prep(sanitized_prompt)
-            else:
-                prep_result = N8nResearchPipeline.execute_prep(sanitized_prompt, repo_context=repo_summary)
-
-        if prep_result.success and prep_result.sanitized_context:
-            prep_context_md = prep_result.sanitized_context.quarantined_markdown
-            source_url = prep_result.source_url
-            raw_len = len(prep_result.sanitized_context.raw_text)
-            pruned_tokens = max(10, len(prep_context_md.split()))
-            print_research_panel(prep_context_md, source_url)
-        else:
-            circuit_tripped = prep_result.circuit_tripped
-            console.print(f"[yellow]⚠️ Prep pipeline unavailable ({prep_result.error_message}) -> Failing open to direct execution.[/yellow]")
-
-    elif classification.intent == "RESEARCH_ONLY":
-        # Pure information display
-        console.print("[bold green]ℹ️ Pure research mode:[/bold green] No code execution requested.")
-        return
-
-    # Step 5: Canonical Prompt Transformation
-    ast = CanonicalPromptAST(
-        user_prompt=sanitized_prompt,
-        intent=classification.intent,
-        complexity_score=classification.complexity_score,
-        injected_context=prep_context_md,
-        source_url=source_url,
-        repo_context=repo_summary,
-    )
-    payload = PromptTransformer.transform(ast, target_engine_name)
-
-    # Step 6: Dispatch to Execution Engine
-    registry = get_engine_registry()
-    engine_instance = registry.get_engine(target_engine_name)
-
-    if mock_mode:
-        exec_result = MockServices.mock_execution(
-            target_engine_name,
-            sanitized_prompt,
-            prep_context_md,
-            model=classification.suggested_model,
-            effort=classification.effort_level,
-        )
-        console.print(f"\n[bold green]✅ Simulation Complete ({target_engine_name.upper()} - {classification.suggested_model}) [Effort: {classification.effort_level}/5 Extra][/bold green]")
-        console.print(exec_result.output_text)
-    else:
-        exec_result = engine_instance.execute(
-            payload=payload,
-            interactive=interactive,
-            model_name=classification.suggested_model,
-            effort_level=classification.effort_level,
-        )
-
-    duration_ms = (time.time() - start_time) * 1000
-
-    # Step 7: Record Audit Log & Telemetry
-    AuditLogger.log_event(
-        user_prompt=prompt,
-        intent=classification.intent,
-        engine=target_engine_name,
-        prep_invoked=should_prep,
-        prep_context=prep_context_md,
-        dlp_violations=dlp_violations,
-        duration_ms=duration_ms,
-        circuit_status=get_circuit_breaker().state.value,
-        exit_code=exec_result.exit_code,
-        extra_metadata={"model": classification.suggested_model, "effort": classification.effort_level},
+    status = console.status(
+        "[bold cyan]⚡ Calling n8n Research Pipeline... Fetching & condensing context...[/bold cyan]",
+        spinner="dots",
     )
 
-    TelemetryROI.record_command(
-        intent=classification.intent,
-        prep_used=should_prep,
-        raw_context_length=raw_len,
-        pruned_context_tokens=pruned_tokens,
-        duration_ms=duration_ms,
-        is_cache_hit=bool(exec_result.gateway_metadata and exec_result.gateway_metadata.get("cache_status") == "HIT"),
-        circuit_tripped=circuit_tripped,
+    def on_event(event: RouterEvent) -> None:
+        if event.kind == "dlp_violation":
+            violations = event.data["violations"]
+            console.print(
+                f"[bold red]🛡️  CSO DLP Alert:[/bold red] Detected sensitive patterns: "
+                f"{', '.join(violations)}. Sanitizing before network egress."
+            )
+        elif event.kind == "classified":
+            print_intent_badge(event.data["classification"], event.data["engine"])
+        elif event.kind == "prep_start":
+            status.start()
+        elif event.kind == "prep_complete":
+            status.stop()
+            print_research_panel(event.data["markdown"], event.data.get("source_url"))
+        elif event.kind == "prep_failed":
+            status.stop()
+            console.print(
+                f"[yellow]⚠️ Prep pipeline unavailable ({event.data.get('error_message')}) "
+                f"-> Failing open to direct execution.[/yellow]"
+            )
+        elif event.kind == "research_only":
+            console.print("[bold green]ℹ️ Pure research mode:[/bold green] No code execution requested.")
+        elif event.kind == "execution_complete" and event.data.get("mock"):
+            result = event.data["result"]
+            console.print(
+                f"\n[bold green]✅ Simulation Complete "
+                f"({event.data['engine'].upper()} - {event.data['model']}) "
+                f"[Effort: {event.data['effort']}/5 Extra][/bold green]"
+            )
+            console.print(result.output_text)
+
+    router.route(
+        prompt=prompt,
+        engine=forced_engine,
+        prep=prep,
+        interactive=interactive,
+        mock=mock_mode,
+        offline=offline_mode,
+        on_event=on_event,
     )
 
 

@@ -1,7 +1,9 @@
 import json
 import os
+import contextvars
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Iterator, Optional, Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -96,16 +98,33 @@ class AppConfig(BaseSettings):
         return cls(**data)
 
 
-_config_instance: Optional[AppConfig] = None
+_config_var: "contextvars.ContextVar[Optional[AppConfig]]" = contextvars.ContextVar(
+    "ai_router_config", default=None
+)
 
 
 def get_config() -> AppConfig:
-    global _config_instance
-    if _config_instance is None:
-        _config_instance = AppConfig.load_hierarchical()
-    return _config_instance
+    cfg = _config_var.get()
+    if cfg is None:
+        cfg = AppConfig.load_hierarchical()
+        _config_var.set(cfg)
+    return cfg
 
 
 def set_config(config: AppConfig):
-    global _config_instance
-    _config_instance = config
+    _config_var.set(config)
+
+
+@contextmanager
+def config_scope(cfg: AppConfig) -> Iterator[AppConfig]:
+    """
+    Temporarily scopes `get_config()`/`set_config()` to `cfg` for the duration of the
+    `with` block, restoring whatever was previously in effect on exit. Lets a facade
+    caller (e.g. `AIRouter.route()`) inject a config for one call without permanently
+    mutating the ambient process-wide config, and is safe under threads/async.
+    """
+    token = _config_var.set(cfg)
+    try:
+        yield cfg
+    finally:
+        _config_var.reset(token)

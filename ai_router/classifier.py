@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import httpx
 from ai_router.config import get_config
 from ai_router.context_scanner import ContextScanner
+from ai_router.quality_gate import QualityGate
 
 
 @dataclass
@@ -24,16 +25,27 @@ class ClassificationResult:
 class IntentClassifier:
     """
     Traffic Cop / Intent & Model Classifier:
-    1. Fast-Path Regex Heuristic (<5ms) for obvious local commands.
+    1. Fast-Path Regex Heuristic (<5ms) for obvious local commands - gated by
+       QualityGate.fast_path_eligible() first (SPEC-ai-engineering.md A13):
+       a regex match on the opening words is not sufficient on its own, since
+       it discards everything the prompt says after them.
     2. Gemini 2.5 Flash API (temperature: 0.0, thinking_budget: 0) for context-aware model & effort identification.
     3. Defaults to Claude Opus with Effort 5 (Extra) for heavy/standard Claude Code tasks.
     4. Fallback Heuristic if offline or API key missing.
+
+    Every path clamps its result through QualityGate.apply() before
+    returning: quality is always priority, then cost
+    (SPEC-ai-engineering.md Sec.0), so nothing here is allowed to under-shoot
+    the floor for what the prompt actually asked for.
     """
 
     FAST_EXECUTE_PATTERNS = [
         r"(?i)^(fix|correct)\s+(typo|spelling|syntax|indentation|lint)",
         r"(?i)^run\s+(pytest|tests?|npm\s+test|cargo\s+test|build)",
-        r"(?i)^git\s+(status|diff|add|commit|push|checkout|branch)",
+        # Read-only git only. `add`, `commit`, `push`, `checkout` and `branch`
+        # all mutate state and do not belong on a path that skips
+        # classification (SPEC-ai-engineering.md A13 point 3).
+        r"(?i)^git\s+(status|diff|log|show)\b",
         r"(?i)^format\s+(this|code|file)",
         r"(?i)^rename\s+(variable|function|file)\s+",
         r"(?i)^add\s+a\s+comment\s+",
@@ -51,23 +63,28 @@ class IntentClassifier:
         start_time = time.time()
         config = get_config()
 
-        # 1. Check Fast-Path (<5ms)
-        for pattern in cls.FAST_EXECUTE_PATTERNS:
-            if re.search(pattern, user_prompt.strip()):
-                elapsed = (time.time() - start_time) * 1000
-                engine = force_engine or config.default_engine
-                model = "claude-haiku-4-5-20251001" if engine == "claude" else ("gemini-2.5-flash" if engine == "gemini" else config.codex_model)
-                return ClassificationResult(
-                    intent="EXECUTE_ONLY",
-                    complexity_score=1,
-                    suggested_engine=engine,
-                    suggested_model=model,
-                    effort_level=1,
-                    confidence=0.99,
-                    reasoning="Matched fast-path local edit pattern",
-                    is_fast_path=True,
-                    evaluation_duration_ms=elapsed,
-                )
+        # 1. Check Fast-Path (<5ms) - only for prompts that clear the
+        # quality gate first (SPEC-ai-engineering.md A13). A pattern match
+        # on the opening words used to be sufficient by itself; it is not
+        # any more, because it discards everything after them.
+        stripped_prompt = user_prompt.strip()
+        if QualityGate.fast_path_eligible(stripped_prompt):
+            for pattern in cls.FAST_EXECUTE_PATTERNS:
+                if re.search(pattern, stripped_prompt):
+                    elapsed = (time.time() - start_time) * 1000
+                    engine = force_engine or config.default_engine
+                    model = "claude-haiku-4-5-20251001" if engine == "claude" else ("gemini-2.5-flash" if engine == "gemini" else config.codex_model)
+                    return ClassificationResult(
+                        intent="EXECUTE_ONLY",
+                        complexity_score=1,
+                        suggested_engine=engine,
+                        suggested_model=model,
+                        effort_level=1,
+                        confidence=0.99,
+                        reasoning="Matched fast-path local edit pattern",
+                        is_fast_path=True,
+                        evaluation_duration_ms=elapsed,
+                    )
 
         # 2. Try Gemini 2.5 Flash API if configured and not offline
         if config.gemini_api_key and not config.offline_mode:
@@ -128,15 +145,27 @@ class IntentClassifier:
                 default_claude_model = config.claude_model
                 model = parsed.get("suggested_model", default_claude_model if engine == "claude" else "gemini-2.5-flash")
                 effort = int(parsed.get("effort_level", config.claude_default_effort if engine == "claude" else 3))
+                intent = parsed.get("intent", "EXECUTE_ONLY")
+                reasoning = parsed.get("reasoning", "Gemini 2.5 Flash context-aware classification")
+
+                # The model returned this is still just a classifier - it can
+                # under-shoot the floor for a sensitive prompt as easily as
+                # the heuristics can. Same clamp, same reason it's applied
+                # everywhere else.
+                effort, model, gate_reason = QualityGate.apply(
+                    user_prompt, intent, effort, model, engine, config
+                )
+                if gate_reason:
+                    reasoning = f"{reasoning} (quality gate: {gate_reason})"
 
                 return ClassificationResult(
-                    intent=parsed.get("intent", "EXECUTE_ONLY"),
+                    intent=intent,
                     complexity_score=int(parsed.get("complexity_score", 3)),
                     suggested_engine=engine,
                     suggested_model=model,
                     effort_level=effort,
                     confidence=0.95,
-                    reasoning=parsed.get("reasoning", "Gemini 2.5 Flash context-aware classification"),
+                    reasoning=reasoning,
                     is_fast_path=False,
                     evaluation_duration_ms=elapsed,
                 )
@@ -179,6 +208,18 @@ class IntentClassifier:
                 suggested_model = config.claude_model
                 effort = config.claude_default_effort
 
+        # E.g. "analyze all files" / "entire codebase" above chose Gemini
+        # Flash at effort 3 purely on keyword match, with no notion that
+        # "entire" is itself a signal the floor should be higher. Same
+        # clamp as every other path.
+        effort, suggested_model, gate_reason = QualityGate.apply(
+            user_prompt, intent, effort, suggested_model, suggested_engine, config
+        )
+
+        reasoning = f"Identified optimal model {suggested_model} with effort {effort} based on task requirements"
+        if gate_reason:
+            reasoning = f"{reasoning} (quality gate: {gate_reason})"
+
         elapsed = (time.time() - start_time) * 1000
         return ClassificationResult(
             intent=intent,
@@ -187,7 +228,7 @@ class IntentClassifier:
             suggested_model=suggested_model,
             effort_level=effort,
             confidence=0.90,
-            reasoning=f"Identified optimal model {suggested_model} with effort {effort} based on task requirements",
+            reasoning=reasoning,
             is_fast_path=False,
             evaluation_duration_ms=elapsed,
         )

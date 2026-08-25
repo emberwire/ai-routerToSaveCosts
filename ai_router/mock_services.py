@@ -5,6 +5,7 @@ from ai_router.n8n_pipeline import PrepResult
 from ai_router.security_guard import SecurityGuard
 from ai_router.engines.base import ExecutionResult, EngineStatus
 from ai_router.config import get_config
+from ai_router.quality_gate import QualityGate
 
 
 class MockServices:
@@ -46,6 +47,17 @@ class MockServices:
             model = config.claude_model
             effort = 5
 
+        # Mock mode has its own keyword logic and never touches the real
+        # classifier, so it needs the same clamp applied directly - found
+        # 2026-08-25 by adversarial verification: without this, --mock
+        # demonstrated the pre-A13-fix behavior even after the real path
+        # was fixed, which would mislead anyone previewing routing this way.
+        is_fast_path = intent == "EXECUTE_ONLY" and QualityGate.fast_path_eligible(prompt)
+        effort, model, gate_reason = QualityGate.apply(prompt, intent, effort, model, engine, config)
+        reasoning = f"Mock Classifier: Identified {model} with effort {effort}/5"
+        if gate_reason:
+            reasoning = f"{reasoning} (quality gate: {gate_reason})"
+
         return ClassificationResult(
             intent=intent,
             complexity_score=score,
@@ -53,8 +65,8 @@ class MockServices:
             suggested_model=model,
             effort_level=effort,
             confidence=0.98,
-            reasoning=f"Mock Classifier: Identified {model} with effort {effort}/5",
-            is_fast_path=intent == "EXECUTE_ONLY",
+            reasoning=reasoning,
+            is_fast_path=is_fast_path,
             evaluation_duration_ms=4.2,
         )
 

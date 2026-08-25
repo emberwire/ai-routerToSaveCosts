@@ -15,7 +15,7 @@ class AppConfig(BaseSettings):
 
     # Intent & Model Classifier Settings
     gemini_api_key: Optional[str] = Field(default=None, alias="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-3.7-flash", alias="GEMINI_MODEL")
+    gemini_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_MODEL")
     gemini_temperature: float = Field(default=0.0, alias="GEMINI_TEMPERATURE")
     gemini_thinking_budget: int = Field(default=0, alias="GEMINI_THINKING_BUDGET")
 
@@ -29,12 +29,12 @@ class AppConfig(BaseSettings):
     # Pluggable Execution Engine Settings (Defaults to Opus with Effort 5 Extra)
     default_engine: Literal["claude", "gemini", "codex", "auto"] = Field(default="claude", alias="DEFAULT_ENGINE")
     claude_binary_path: Optional[str] = Field(default="/opt/homebrew/bin/claude", alias="CLAUDE_BINARY_PATH")
-    claude_model: str = Field(default="claude-3-opus", alias="CLAUDE_MODEL")
+    claude_model: str = Field(default="claude-opus-5", alias="CLAUDE_MODEL")
     claude_default_effort: int = Field(default=5, alias="CLAUDE_DEFAULT_EFFORT") # Effort 5 Extra
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
     codex_model: str = Field(default="o3-mini", alias="CODEX_MODEL")
-    gemini_exec_model: str = Field(default="gemini-3.7-flash", alias="GEMINI_EXEC_MODEL")
+    gemini_exec_model: str = Field(default="gemini-2.5-pro", alias="GEMINI_EXEC_MODEL")
 
     # Cloudflare AI Gateway Settings
     cf_account_id: Optional[str] = Field(default=None, alias="CF_ACCOUNT_ID")

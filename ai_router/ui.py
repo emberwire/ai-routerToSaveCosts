@@ -61,7 +61,7 @@ def render_launcher_screen():
         engine_badges.append("[dim magenta]🟣 Claude[/dim magenta] [dim yellow]○[/dim yellow]")
 
     if statuses.get("gemini"):
-        engine_badges.append(f"[bold blue]🔵 Gemini 3.7[/bold blue] [green]●[/green] [dim]({config.gemini_model})[/dim]")
+        engine_badges.append(f"[bold blue]🔵 Gemini 2.5[/bold blue] [green]●[/green] [dim]({config.gemini_model})[/dim]")
     else:
         engine_badges.append("[dim blue]🔵 Gemini[/dim blue] [dim yellow]○[/dim yellow]")
 
@@ -110,7 +110,7 @@ def render_launcher_screen():
 
     menu_table.add_row("1", "🚀 Run AI Task Prompt", "Execute a task with automatic intent evaluation and n8n prep")
     menu_table.add_row("2", "🟣 Launch Claude Code (Opus)", "Interactive TTY terminal coding session with Claude Opus (Effort 5)")
-    menu_table.add_row("3", "🔵 Launch Gemini Assistant", "Large context (2M tokens) live streaming coding assistant (Gemini 3.7)")
+    menu_table.add_row("3", "🔵 Launch Gemini Assistant", "Large context (2M tokens) live streaming coding assistant (Gemini 2.5)")
     menu_table.add_row("4", "🟢 Launch Codex / o-series", "OpenAI o3-mini/o1 deep reasoning execution session")
     menu_table.add_row("5", "🩺 System Diagnostics", "Run 1-click self-healing health check (ai doctor)")
     menu_table.add_row("6", "📊 ROI & Telemetry Report", "Detailed token compression and dollar savings dashboard (ai roi)")
@@ -158,7 +158,7 @@ def print_roi_dashboard(stats: CumulativeStats):
     table.add_row("Prep Invocations (n8n)", str(stats.prep_invocations), "Heavy research tasks offloaded")
     table.add_row("Execute Only (Direct)", str(stats.execute_only_count), "Fast-path & local direct edits")
     table.add_row("Tokens Spared / Compressed", f"{stats.context_tokens_spared:,} tokens", "Saved from frontier context window")
-    table.add_row("Net Dollar Savings (USD)", f"${stats.dollar_savings_usd:.4f}", "Based on Claude 3.5 Sonnet token pricing")
+    table.add_row("Net Dollar Savings (USD)", f"${stats.dollar_savings_usd:.4f}", "Based on mid-tier Claude model token pricing")
     table.add_row("Edge Cache Hits", str(stats.cache_hits), "Zero-latency Cloudflare edge hits")
     table.add_row("Circuit Breaker Trips", str(stats.circuit_trips), "Fail-open activations (zero dev block)")
 

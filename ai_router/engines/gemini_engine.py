@@ -11,7 +11,7 @@ from ai_router.stream_renderer import StreamRenderer
 
 class GeminiExecutionEngine(BaseExecutionEngine):
     """
-    Gemini 3.7 / 2.5 Pro / Flash Execution Engine:
+    Gemini 2.5 / 2.5 Pro / Flash Execution Engine:
     - Supports large context window analysis (up to 2M tokens).
     - Streams code output live with syntax highlighting.
     - Proxies through Cloudflare AI Gateway when enabled.

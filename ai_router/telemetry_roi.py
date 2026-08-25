@@ -27,7 +27,7 @@ class TelemetryROI:
     and cumulative dollar savings vs uncompressed frontier model input.
     """
 
-    # Claude 3.5 Sonnet standard pricing: $3.00 / 1M input, $15.00 / 1M output
+    # Mid-tier Claude model reference pricing: $3.00 / 1M input tokens
     ANTHROPIC_INPUT_PRICE_PER_M = 3.00
 
     @classmethod

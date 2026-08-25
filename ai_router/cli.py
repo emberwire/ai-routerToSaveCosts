@@ -231,8 +231,8 @@ def eval_command():
 @app.command(name="config")
 def config_command(
     set_engine: Optional[str] = typer.Option(None, "--default-engine", help="Set default engine (claude, gemini, codex, auto)"),
-    set_claude_model: Optional[str] = typer.Option(None, "--claude-model", help="Set Claude model (e.g. claude-3-opus, claude-3-7-sonnet)"),
-    set_gemini_model: Optional[str] = typer.Option(None, "--gemini-model", help="Set Gemini model (e.g. gemini-3.7-flash, gemini-2.5-flash)"),
+    set_claude_model: Optional[str] = typer.Option(None, "--claude-model", help="Set Claude model (e.g. claude-opus-5, claude-sonnet-5)"),
+    set_gemini_model: Optional[str] = typer.Option(None, "--gemini-model", help="Set Gemini model (e.g. gemini-2.5-flash, gemini-2.5-pro)"),
     set_n8n: Optional[str] = typer.Option(None, "--n8n-url", help="Set n8n webhook URL"),
     set_cf_gateway: Optional[bool] = typer.Option(None, "--enable-gateway", help="Toggle Cloudflare AI Gateway"),
 ):

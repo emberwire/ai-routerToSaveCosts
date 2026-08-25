@@ -18,4 +18,4 @@ dependencies = [
 ]
 
 [project.scripts]
-ai = "ai_router.cli:app"
+ai = "ai_router.cli:cli_entrypoint"

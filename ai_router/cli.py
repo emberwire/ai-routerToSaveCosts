@@ -21,6 +21,7 @@ from ai_router.circuit_breaker import get_circuit_breaker
 from ai_router.ui import (
     console,
     print_banner,
+    render_launcher_screen,
     print_intent_badge,
     print_research_panel,
     print_roi_dashboard,
@@ -34,7 +35,7 @@ app = typer.Typer(
     no_args_is_help=False,
 )
 
-KNOWN_SUBCOMMANDS = {"doctor", "roi", "eval", "config", "run", "--help", "-h"}
+KNOWN_SUBCOMMANDS = {"doctor", "roi", "eval", "config", "run", "launcher", "--help", "-h"}
 
 
 def run_pipeline(
@@ -260,33 +261,48 @@ def config_command(
     console.print(table)
 
 
-def run_interactive_wizard():
-    print_banner()
-    console.print("[bold yellow]Interactive Mode[/bold yellow] - Select an action:\n")
-    console.print("1. [bold cyan]🚀 Run AI Task[/bold cyan] (Prompt routing with automated n8n prep)")
-    console.print("2. [bold magenta]🩺 Run System Diagnostics (ai doctor)[/bold magenta]")
-    console.print("3. [bold green]📊 View ROI & Savings Telemetry (ai roi)[/bold green]")
-    console.print("4. [bold blue]🧪 Run Routing Benchmark Evals (ai eval)[/bold blue]")
-    console.print("5. [bold white]⚙️ View / Edit Configuration (ai config)[/bold white]")
-    console.print("6. [bold red]🚪 Exit[/bold red]\n")
+@app.command(name="launcher")
+def launcher_command():
+    """
+    Open the full-screen interactive launcher dashboard.
+    """
+    run_interactive_wizard()
 
-    choice = Prompt.ask("Choose an option [1-6]", default="1")
+
+def run_interactive_wizard():
+    render_launcher_screen()
+    choice = Prompt.ask("[bold cyan]Select action[/bold cyan] [1-8, Q]", default="1")
 
     if choice == "1":
-        task_prompt = Prompt.ask("\nEnter your task prompt")
+        task_prompt = Prompt.ask("\n[bold yellow]Enter your task prompt[/bold yellow]")
         engine_choice = Prompt.ask("Select engine [claude/gemini/codex/auto]", default="claude")
         mock_choice = Prompt.ask("Run with mock simulation? [y/N]", default="n").lower() == "y"
         run_pipeline(prompt=task_prompt, forced_engine=engine_choice, mock_mode=mock_choice)
     elif choice == "2":
-        doctor_command()
+        task_prompt = Prompt.ask("\n[bold magenta]Enter Claude prompt (or press Enter for interactive REPL)[/bold magenta]", default="")
+        mock_choice = Prompt.ask("Run with mock simulation? [y/N]", default="n").lower() == "y"
+        run_pipeline(prompt=task_prompt or "Start interactive coding session", forced_engine="claude", mock_mode=mock_choice)
     elif choice == "3":
-        roi_command()
+        task_prompt = Prompt.ask("\n[bold blue]Enter Gemini prompt (2M context assistant)[/bold blue]")
+        mock_choice = Prompt.ask("Run with mock simulation? [y/N]", default="n").lower() == "y"
+        run_pipeline(prompt=task_prompt, forced_engine="gemini", mock_mode=mock_choice)
     elif choice == "4":
-        eval_command()
+        task_prompt = Prompt.ask("\n[bold green]Enter Codex / o-series prompt (deep reasoning)[/bold green]")
+        mock_choice = Prompt.ask("Run with mock simulation? [y/N]", default="n").lower() == "y"
+        run_pipeline(prompt=task_prompt, forced_engine="codex", mock_mode=mock_choice)
     elif choice == "5":
+        doctor_command()
+    elif choice == "6":
+        roi_command()
+    elif choice == "7":
+        eval_command()
+    elif choice == "8":
         config_command(None, None, None)
+    elif choice.upper() == "Q":
+        console.print("\n[dim]Goodbye![/dim]\n")
+        return
     else:
-        console.print("[dim]Goodbye![/dim]")
+        console.print("[dim]Unrecognized choice. Exiting launcher.[/dim]")
 
 
 def cli_entrypoint():
@@ -297,8 +313,6 @@ def cli_entrypoint():
 
     first_arg = args[0]
     if first_arg not in KNOWN_SUBCOMMANDS and not first_arg.startswith("-"):
-        # The user typed `ai "my prompt..." [flags]`
-        # We forward this directly to `run_command`
         sys.argv.insert(1, "run")
 
     app()

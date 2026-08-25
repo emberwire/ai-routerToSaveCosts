@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-routed-cli"
+version = "4.0.0"
+description = "Enterprise AI-Routed CLI Agent orchestrator with Gemini classifier, n8n prep pipeline, and multi-model execution."
+authors = [{ name = "AI Engineering Team" }]
+dependencies = [
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.2.0",
+    "python-dotenv>=1.0.1",
+    "prompt-toolkit>=3.0.43"
+]
+
+[project.scripts]
+ai = "ai_router.cli:app"
